@@ -3,7 +3,6 @@ package routes
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/irwanrusda/rtmp-general-backend/app/controllers"
