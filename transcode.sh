@@ -16,16 +16,24 @@ RTMP_OUTPUT_BASE="rtmp://127.0.0.1/hls_out/$STREAM_KEY"
 # Wait briefly for stream to become available
 sleep 0.5
 
-# 1. Detect incoming stream resolution using ffprobe
-echo "[Transcoder] Probing stream resolution for $STREAM_KEY..."
-RESOLUTION=$(ffprobe -v error -select_streams v:0 \
-    -show_entries stream=height \
-    -of default=noprint_wrappers=1:nokey=1 \
-    -analyzeduration 100000 -probesize 100000 \
-    "$RTMP_INPUT" 2>/dev/null)
+# 1. Detect incoming stream resolution using ffprobe (Retry up to 5 times)
+RESOLUTION=""
+for i in {1..5}; do
+    echo "[Transcoder] Probing stream resolution for $STREAM_KEY (Attempt $i)..."
+    RESOLUTION=$(ffprobe -v error -select_streams v:0 \
+        -show_entries stream=height \
+        -of default=noprint_wrappers=1:nokey=1 \
+        -analyzeduration 3000000 -probesize 3000000 \
+        "$RTMP_INPUT" 2>/dev/null)
+        
+    if [ -n "$RESOLUTION" ] && [ "$RESOLUTION" -gt 0 ] 2>/dev/null; then
+        break
+    fi
+    sleep 1
+done
 
-if [ -z "$RESOLUTION" ]; then
-    echo "[Transcoder] WARNING: Could not detect resolution, defaulting to 0"
+if [ -z "$RESOLUTION" ] || [ "$RESOLUTION" -eq 0 ] 2>/dev/null; then
+    echo "[Transcoder] WARNING: Could not detect resolution after 5 attempts, defaulting to 0"
     RESOLUTION=0
 fi
 
