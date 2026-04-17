@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# transcode.sh - Dynamic RTMP Copy/Reject Wrapper
+# Usage: ./transcode.sh <stream_key>
+# 
+# Flow:
+# 1. ffprobe detects incoming stream resolution
+# 2. Query DB for user's allowed_quality_id
+# 3. If resolution exceeds limit → REJECT + log to stream_logs
+# 4. If resolution is within limit → copy mode (-c copy, 0% CPU)
+
+STREAM_KEY=$1
+RTMP_INPUT="rtmp://127.0.0.1/live/$STREAM_KEY"
+RTMP_OUTPUT_BASE="rtmp://127.0.0.1/hls_out/$STREAM_KEY"
+
+# Wait briefly for stream to become available
+sleep 0.5
+
+# 1. Detect incoming stream resolution using ffprobe
+echo "[Transcoder] Probing stream resolution for $STREAM_KEY..."
+RESOLUTION=$(ffprobe -v error -select_streams v:0 \
+    -show_entries stream=height \
+    -of default=noprint_wrappers=1:nokey=1 \
+    -analyzeduration 100000 -probesize 100000 \
+    "$RTMP_INPUT" 2>/dev/null)
+
+if [ -z "$RESOLUTION" ]; then
+    echo "[Transcoder] WARNING: Could not detect resolution, defaulting to 0"
+    RESOLUTION=0
+fi
+
+echo "[Transcoder] Detected height: ${RESOLUTION}p"
+
+# 2. Look up allowed quality for this stream key, prioritizing stream-specific override
+# IFNULL allows us to fall back to user's allowed_quality_id if override_quality_id is NULL
+RESULT=$(mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -N -s -e \
+    "SELECT IFNULL(sk.override_quality_id, u.allowed_quality_id), u.id FROM stream_keys sk JOIN users u ON sk.user_id = u.id WHERE sk.stream_key='$STREAM_KEY'")
+
+QUALITY_ID=$(echo "$RESULT" | awk '{print $1}')
+USER_ID=$(echo "$RESULT" | awk '{print $2}')
+
+# Fallback to 480p if not found
+if [ -z "$QUALITY_ID" ]; then
+    QUALITY_ID=2
+fi
+
+# 3. Map quality_id to max allowed height
+case $QUALITY_ID in
+    1) MAX_HEIGHT=360 ;;
+    3) MAX_HEIGHT=720 ;;
+    4) MAX_HEIGHT=1080 ;;
+    *) MAX_HEIGHT=480 ;;
+esac
+
+echo "[Transcoder] User ID: $USER_ID | Quality limit: ${MAX_HEIGHT}p | Stream: ${RESOLUTION}p"
+
+# 4. Compare: reject if stream resolution exceeds allowed limit
+if [ "$RESOLUTION" -gt "$MAX_HEIGHT" ] 2>/dev/null; then
+    echo "[Transcoder] REJECTED: Stream ${RESOLUTION}p exceeds limit ${MAX_HEIGHT}p for $STREAM_KEY"
+    
+    # Log rejection to database
+    if [ -n "$USER_ID" ]; then
+        mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -e \
+            "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'rejected', 'Resolusi stream ${RESOLUTION}p melebihi batas ${MAX_HEIGHT}p. Silakan ubah pengaturan Output Resolution di OBS.')"
+    fi
+    
+    # Kill the stream - exit non-zero so nginx stops the exec
+    curl -s "http://127.0.0.1/control/drop/publisher?app=live&name=$STREAM_KEY"
+    exit 1
+fi
+
+# 5. Log successful connection
+if [ -n "$USER_ID" ]; then
+    mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -e \
+        "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'connected', 'Stream ${RESOLUTION}p dimulai (copy mode, tanpa transcode)')"
+fi
+
+# 6. Execute FFmpeg in COPY mode (0% CPU usage)
+echo "[Transcoder] APPROVED: Starting copy-mode relay for $STREAM_KEY (${RESOLUTION}p → ${MAX_HEIGHT}p limit)"
+ffmpeg -fflags nobuffer -flags low_delay -i "$RTMP_INPUT" \
+    -c copy \
+    -f flv "$RTMP_OUTPUT_BASE"
+
+# 7. Log disconnection when ffmpeg exits
+if [ -n "$USER_ID" ]; then
+    mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -e \
+        "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'disconnected', 'Stream dihentikan')"
+fi
