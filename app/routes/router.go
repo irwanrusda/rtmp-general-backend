@@ -10,32 +10,7 @@ import (
 	"github.com/irwanrusda/rtmp-general-backend/app/core"
 )
 
-// CORSMiddleware handles cross-origin requests from the frontend container
-func CORSMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		frontendURL := os.Getenv("FRONTEND_URL")
-		if frontendURL == "" {
-			frontendURL = "https://rtmp.nanobyte.web.id"
-		}
-
-		origin := r.Header.Get("Origin")
-		// Allow configured frontend + localhost for dev
-		if origin == frontendURL || strings.HasPrefix(origin, "http://localhost") {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		}
-
-		// Handle preflight
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
+// CORSMiddleware is removed because Nginx handles CORS directly.
 
 // InitRouter maps URL paths to Go functions
 func InitRouter() *http.ServeMux {

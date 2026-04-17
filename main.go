@@ -18,8 +18,8 @@ func main() {
 	// Initialize Routes
 	router := routes.InitRouter()
 
-	// Apply Middlewares (CORS must wrap the router)
-	handler := routes.CORSMiddleware(routes.Logger(router))
+	// Apply Middlewares
+	handler := routes.Logger(router)
 
 	// Start Server on 8080 (nginx reverse-proxies /api/* to here)
 	port := "8080"
