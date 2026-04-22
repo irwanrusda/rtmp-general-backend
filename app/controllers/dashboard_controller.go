@@ -119,20 +119,31 @@ func DropActiveStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var ownerID int
 	if !user.CanManageUsers {
-		var ownerID int
 		err := config.DB.QueryRow("SELECT user_id FROM stream_keys WHERE stream_key = ?", streamKey).Scan(&ownerID)
 		if err != nil || ownerID != user.ID {
 			core.ErrorResponse(w, 403, "Forbidden")
 			return
 		}
+	} else {
+		config.DB.QueryRow("SELECT user_id FROM stream_keys WHERE stream_key = ?", streamKey).Scan(&ownerID)
 	}
 
 	_, err := config.DB.Exec("DELETE FROM active_streams WHERE stream_key = ?", streamKey)
 	if err != nil {
-		core.ErrorResponse(w, 500, "Gagal menghapus aktif stream")
+		core.ErrorResponse(w, 500, "Gagal menghapus active stream")
 		return
 	}
+
+	// Tambahan: Logkan kejadian putusnya jika ada owner id (Force drop)
+	if ownerID > 0 {
+		config.DB.Exec("INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES (?, ?, 'disconnected', 'Diberhentikan paksa oleh Admin/Sistem')", ownerID, streamKey)
+	}
+
+	// Panggil Nginx control module untuk kill rtmp stream (opsional tapi dianjurkan jika pakai nginx control)
+	// Kita bisa panggil request drop HTTP lokal ke nginx
+	_, _ = http.Get(fmt.Sprintf("http://127.0.0.1/control/drop/publisher?app=live&name=%s", streamKey))
 
 	core.JSONResponse(w, 200, core.H{"message": "Ghost stream berhasil dihapus"})
 }
@@ -234,5 +245,50 @@ func StreamLogs(w http.ResponseWriter, r *http.Request) {
 	if logs == nil {
 		logs = []core.H{}
 	}
+	core.JSONResponse(w, 200, logs)
+}
+
+// TrafficHistory handles GET /api/admin/traffic-history
+func TrafficHistory(w http.ResponseWriter, r *http.Request) {
+	user := core.GetSessionUser(r)
+	if user == nil || !user.CanManageUsers {
+		core.ErrorResponse(w, 403, "Forbidden")
+		return
+	}
+
+	// Ambil histori global 500 logs terakhir digabung dengan data user
+	query := `
+		SELECT l.id, l.stream_key, l.event_type, l.message, l.created_at, u.username, u.display_name
+		FROM stream_logs l
+		JOIN users u ON l.user_id = u.id
+		ORDER BY l.created_at DESC
+		LIMIT 200
+	`
+	rows, err := config.DB.Query(query)
+	if err != nil {
+		core.ErrorResponse(w, 500, "Database error")
+		return
+	}
+	defer rows.Close()
+
+	var logs []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var sk, ev, msg, un, dn string
+		var ca []uint8
+		rows.Scan(&id, &sk, &ev, &msg, &ca, &un, &dn)
+
+		// Ekstrak hari/waktu jam untuk mempermudah grouping di frontend Recharts
+		logs = append(logs, map[string]interface{}{
+			"id":           id,
+			"stream_key":   sk,
+			"event_type":   ev,
+			"message":      msg,
+			"created_at":   string(ca),
+			"username":     un,
+			"display_name": dn,
+		})
+	}
+
 	core.JSONResponse(w, 200, logs)
 }
