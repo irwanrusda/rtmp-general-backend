@@ -25,6 +25,6 @@ COPY start.sh /start.sh
 COPY transcode.sh /usr/local/bin/transcode.sh
 RUN chmod +x /start.sh /usr/local/bin/transcode.sh
 
-EXPOSE 1935 80 8080
+EXPOSE 1935 80 8080 8888
 
 CMD ["/start.sh"]
