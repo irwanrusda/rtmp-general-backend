@@ -4,7 +4,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download || true
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/rtmp_server main.go
+
+ARG GIT_SHA
+RUN echo "Building commit: $GIT_SHA" && CGO_ENABLED=0 GOOS=linux go build -o /app/rtmp_server main.go
 
 # Run Stage
 FROM tiangolo/nginx-rtmp
