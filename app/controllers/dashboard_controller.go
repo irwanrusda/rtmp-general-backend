@@ -137,6 +137,46 @@ func DropActiveStream(w http.ResponseWriter, r *http.Request) {
 	core.JSONResponse(w, 200, core.H{"message": "Ghost stream berhasil dihapus"})
 }
 
+// ClearStreamCache handles DELETE /api/admin/clear-cache/{streamKey}
+func ClearStreamCache(w http.ResponseWriter, r *http.Request) {
+	user := core.GetSessionUser(r)
+	if user == nil {
+		core.ErrorResponse(w, 401, "Unauthorized")
+		return
+	}
+
+	parts := strings.Split(r.URL.Path, "/")
+	streamKey := parts[len(parts)-1]
+	if streamKey == "" {
+		core.ErrorResponse(w, 400, "Invalid Stream Key")
+		return
+	}
+
+	if !user.CanManageUsers {
+		var ownerID int
+		err := config.DB.QueryRow("SELECT user_id FROM stream_keys WHERE stream_key = ?", streamKey).Scan(&ownerID)
+		if err != nil || ownerID != user.ID {
+			core.ErrorResponse(w, 403, "Forbidden")
+			return
+		}
+	}
+
+	// Hapus file utama playlist m3u8
+	m3u8Path := "/tmp/hls/" + streamKey + ".m3u8"
+	_ = os.Remove(m3u8Path)
+
+	// Cari dan hapus semua segments *.ts yang berkaitan
+	if files, err := ioutil.ReadDir("/tmp/hls"); err == nil {
+		for _, file := range files {
+			if strings.HasPrefix(file.Name(), streamKey+"-") && strings.HasSuffix(file.Name(), ".ts") {
+				_ = os.Remove("/tmp/hls/" + file.Name())
+			}
+		}
+	}
+
+	core.JSONResponse(w, 200, core.H{"message": "Cache HLS berhasil dibersihkan"})
+}
+
 func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	user := core.GetSessionUser(r)
 	if user == nil {

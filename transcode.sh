@@ -16,6 +16,10 @@ RTMP_OUTPUT_BASE="rtmp://127.0.0.1/hls_out/$STREAM_KEY"
 # Wait briefly for stream to become available
 sleep 0.5
 
+# Hapus cache m3u8 lama secara otomatis agar Ghost Stream tidak terjadi
+echo "[Transcoder] Membersihkan cache HLS sisa untuk $STREAM_KEY..."
+rm -f /tmp/hls/${STREAM_KEY}.m3u8 /tmp/hls/${STREAM_KEY}-*.ts
+
 # 1. Detect incoming stream resolution using ffprobe (Retry up to 5 times)
 RESOLUTION=""
 for i in {1..5}; do
@@ -23,7 +27,7 @@ for i in {1..5}; do
     RESOLUTION=$(ffprobe -v error -select_streams v:0 \
         -show_entries stream=height \
         -of default=noprint_wrappers=1:nokey=1 \
-        -analyzeduration 3000000 -probesize 3000000 \
+        -analyzeduration 1500000 -probesize 100000 \
         "$RTMP_INPUT" 2>/dev/null)
         
     if [ -n "$RESOLUTION" ] && [ "$RESOLUTION" -gt 0 ] 2>/dev/null; then
@@ -83,11 +87,20 @@ if [ -n "$USER_ID" ]; then
         "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'connected', 'Stream ${RESOLUTION}p dimulai (copy mode, tanpa transcode)')"
 fi
 
-# 6. Execute FFmpeg in COPY mode (0% CPU usage)
-echo "[Transcoder] APPROVED: Starting copy-mode relay for $STREAM_KEY (${RESOLUTION}p → ${MAX_HEIGHT}p limit)"
+# 6. Execute FFmpeg in COPY mode -> Direct to HLS
+echo "[Transcoder] APPROVED: Starting copy-mode relay for $STREAM_KEY (${RESOLUTION}p → ${MAX_HEIGHT}p limit) and Direct HLS Segmenting"
+
+# Pastikan folder tmp/hls ada
+mkdir -p /tmp/hls
+
 ffmpeg -fflags nobuffer -flags low_delay -i "$RTMP_INPUT" \
     -c copy \
-    -f flv "$RTMP_OUTPUT_BASE"
+    -f hls \
+    -hls_time 2 \
+    -hls_list_size 3 \
+    -hls_flags delete_segments \
+    -hls_segment_filename "/tmp/hls/${STREAM_KEY}-%d.ts" \
+    "/tmp/hls/${STREAM_KEY}.m3u8"
 
 # 7. Log disconnection when ffmpeg exits
 if [ -n "$USER_ID" ]; then

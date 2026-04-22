@@ -59,6 +59,13 @@ func InitRouter() *http.ServeMux {
 			core.ErrorResponse(w, 405, "Method not allowed")
 		}
 	})
+	mux.HandleFunc("/api/admin/clear-cache/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			controllers.ClearStreamCache(w, r)
+		} else {
+			core.ErrorResponse(w, 405, "Method not allowed")
+		}
+	})
 	mux.HandleFunc("/api/profile", controllers.UpdateProfile)
 	mux.HandleFunc("/api/my-stream-logs", controllers.StreamLogs)
 
