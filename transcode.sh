@@ -94,11 +94,13 @@ echo "[Transcoder] APPROVED: Starting copy-mode relay for $STREAM_KEY (${RESOLUT
 mkdir -p /tmp/hls
 
 ffmpeg -fflags nobuffer -flags low_delay -i "$RTMP_INPUT" \
-    -c copy \
+    -c:v copy \
+    -bsf:v h264_mp4toannexb \
+    -c:a copy \
     -f hls \
     -hls_time 2 \
     -hls_list_size 3 \
-    -hls_flags delete_segments \
+    -hls_flags delete_segments+temp_file+independent_segments \
     -hls_segment_filename "/tmp/hls/${STREAM_KEY}-%d.ts" \
     "/tmp/hls/${STREAM_KEY}.m3u8"
 
