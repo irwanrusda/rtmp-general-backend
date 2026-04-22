@@ -53,6 +53,7 @@ func InitRouter() *http.ServeMux {
 
 	mux.HandleFunc("/api/active-streams", controllers.ActiveStreams)
 	mux.HandleFunc("/api/admin/traffic-history", controllers.TrafficHistory)
+	mux.HandleFunc("/api/admin/all-stream-keys", controllers.GetAllStreamKeys)
 	mux.HandleFunc("/api/admin/active-streams/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			controllers.DropActiveStream(w, r)

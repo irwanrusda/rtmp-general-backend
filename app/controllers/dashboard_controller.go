@@ -257,15 +257,34 @@ func TrafficHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ambil histori global 500 logs terakhir digabung dengan data user
+	streamKeyParam := r.URL.Query().Get("stream_key")
+	startParam := r.URL.Query().Get("start")
+	endParam := r.URL.Query().Get("end")
+
 	query := `
 		SELECT l.id, l.stream_key, l.event_type, l.message, l.created_at, u.username, u.display_name
 		FROM stream_logs l
 		JOIN users u ON l.user_id = u.id
-		ORDER BY l.created_at DESC
-		LIMIT 200
+		WHERE 1=1
 	`
-	rows, err := config.DB.Query(query)
+	var args []interface{}
+
+	if streamKeyParam != "" && streamKeyParam != "all" {
+		query += " AND l.stream_key = ?"
+		args = append(args, streamKeyParam)
+	}
+	if startParam != "" {
+		query += " AND l.created_at >= ?"
+		args = append(args, startParam+" 00:00:00")
+	}
+	if endParam != "" {
+		query += " AND l.created_at <= ?"
+		args = append(args, endParam+" 23:59:59")
+	}
+
+	query += " ORDER BY l.created_at DESC LIMIT 1000"
+
+	rows, err := config.DB.Query(query, args...)
 	if err != nil {
 		core.ErrorResponse(w, 500, "Database error")
 		return
@@ -279,7 +298,14 @@ func TrafficHistory(w http.ResponseWriter, r *http.Request) {
 		var ca []uint8
 		rows.Scan(&id, &sk, &ev, &msg, &ca, &un, &dn)
 
-		// Ekstrak hari/waktu jam untuk mempermudah grouping di frontend Recharts
+		if msg == "Diberhentikan paksa oleh Admin/Sistem" {
+			msg = "Forced disconnection by System/Admin"
+		} else if msg == "Stream dihentikan" {
+			msg = "Stream disconnected"
+		} else if strings.Contains(msg, "tanpa transcode") {
+			msg = "Stream started (copy mode, no transcode)"
+		}
+
 		logs = append(logs, map[string]interface{}{
 			"id":           id,
 			"stream_key":   sk,
@@ -292,4 +318,37 @@ func TrafficHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	core.JSONResponse(w, 200, logs)
+}
+
+// GetAllStreamKeys handles GET /api/admin/all-stream-keys
+func GetAllStreamKeys(w http.ResponseWriter, r *http.Request) {
+	user := core.GetSessionUser(r)
+	if user == nil || !user.CanManageUsers {
+		core.ErrorResponse(w, 403, "Forbidden")
+		return
+	}
+
+	rows, err := config.DB.Query("SELECT s.stream_key, s.label, u.username, u.display_name FROM stream_keys s JOIN users u ON s.user_id = u.id")
+	if err != nil {
+		core.ErrorResponse(w, 500, "Database error")
+		return
+	}
+	defer rows.Close()
+
+	var keys []map[string]interface{}
+	for rows.Next() {
+		var sk, lbl, un, dn string
+		rows.Scan(&sk, &lbl, &un, &dn)
+		keys = append(keys, map[string]interface{}{
+			"stream_key":   sk,
+			"label":        lbl,
+			"username":     un,
+			"display_name": dn,
+		})
+	}
+	if keys == nil {
+		keys = []map[string]interface{}{}
+	}
+
+	core.JSONResponse(w, 200, keys)
 }

@@ -73,7 +73,7 @@ if [ "$RESOLUTION" -gt "$MAX_HEIGHT" ] 2>/dev/null; then
     # Log rejection to database
     if [ -n "$USER_ID" ]; then
         mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -e \
-            "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'rejected', 'Resolusi stream ${RESOLUTION}p melebihi batas ${MAX_HEIGHT}p. Silakan ubah pengaturan Output Resolution di OBS.')"
+            "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'rejected', 'Stream resolution ${RESOLUTION}p exceeds limit ${MAX_HEIGHT}p. Please change Output Resolution in OBS.')"
     fi
     
     # Kill the stream - exit non-zero so nginx stops the exec
@@ -84,7 +84,7 @@ fi
 # 5. Log successful connection
 if [ -n "$USER_ID" ]; then
     mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -e \
-        "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'connected', 'Stream ${RESOLUTION}p dimulai (copy mode, tanpa transcode)')"
+        "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'connected', 'Stream ${RESOLUTION}p started (copy mode, no transcode)')"
 fi
 
 # 6. Execute FFmpeg in COPY mode -> Direct to HLS
@@ -105,5 +105,5 @@ ffmpeg -fflags nobuffer -flags low_delay -i "$RTMP_INPUT" \
 # 7. Log disconnection when ffmpeg exits
 if [ -n "$USER_ID" ]; then
     mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -e \
-        "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'disconnected', 'Stream dihentikan')"
+        "INSERT INTO stream_logs (user_id, stream_key, event_type, message) VALUES ($USER_ID, '$STREAM_KEY', 'disconnected', 'Stream disconnected')"
 fi
