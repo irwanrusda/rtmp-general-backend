@@ -12,9 +12,33 @@
 STREAM_KEY=$1
 RTMP_INPUT="rtmp://127.0.0.1/live/$STREAM_KEY"
 RTMP_OUTPUT_BASE="rtmp://127.0.0.1/hls_out/$STREAM_KEY"
+PID_FILE="/tmp/hls/${STREAM_KEY}.pid"
 
 # Wait briefly for stream to become available
 sleep 0.5
+
+# ── Kill any existing FFmpeg for this stream key (prevent zombies) ──
+echo "[Transcoder] Killing old FFmpeg processes for $STREAM_KEY..."
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        kill "$OLD_PID" 2>/dev/null
+        sleep 0.3
+        kill -9 "$OLD_PID" 2>/dev/null
+    fi
+    rm -f "$PID_FILE"
+fi
+# Also kill by pattern matching as safety net
+pkill -f "ffmpeg.*live/${STREAM_KEY}" 2>/dev/null || true
+sleep 0.3
+
+# ── Cleanup handler ──
+cleanup() {
+    echo "[Transcoder] Cleaning up for $STREAM_KEY (PID $$)"
+    rm -f "$PID_FILE"
+    rm -f /tmp/hls/${STREAM_KEY}.m3u8 /tmp/hls/${STREAM_KEY}-*.ts
+}
+trap cleanup EXIT INT TERM
 
 # Hapus cache m3u8 lama secara otomatis agar Ghost Stream tidak terjadi
 echo "[Transcoder] Membersihkan cache HLS sisa untuk $STREAM_KEY..."
@@ -93,7 +117,12 @@ echo "[Transcoder] APPROVED: Starting copy-mode relay for $STREAM_KEY (${RESOLUT
 # Pastikan folder tmp/hls ada
 mkdir -p /tmp/hls
 
-ffmpeg -fflags nobuffer -flags low_delay -i "$RTMP_INPUT" \
+# Write PID file for cleanup tracking
+echo $$ > "$PID_FILE"
+
+ffmpeg -nostdin -fflags nobuffer -flags low_delay \
+    -rw_timeout 5000000 \
+    -i "$RTMP_INPUT" \
     -c:v copy \
     -bsf:v h264_mp4toannexb \
     -c:a copy \
@@ -103,6 +132,9 @@ ffmpeg -fflags nobuffer -flags low_delay -i "$RTMP_INPUT" \
     -hls_flags delete_segments+temp_file+independent_segments \
     -hls_segment_filename "/tmp/hls/${STREAM_KEY}-%d.ts" \
     "/tmp/hls/${STREAM_KEY}.m3u8"
+
+FFMPEG_EXIT=$?
+echo "[Transcoder] FFmpeg exited with code $FFMPEG_EXIT for $STREAM_KEY"
 
 # 7. Log disconnection when ffmpeg exits
 if [ -n "$USER_ID" ]; then

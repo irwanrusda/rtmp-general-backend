@@ -45,9 +45,9 @@ func ActiveStreams(w http.ResponseWriter, r *http.Request) {
 	var stats RtmpStat
 	resp, errStat := http.Get("http://127.0.0.1/stat")
 	if errStat == nil {
+		defer resp.Body.Close()
 		body, _ := ioutil.ReadAll(resp.Body)
 		xml.Unmarshal(body, &stats)
-		resp.Body.Close()
 	}
 
 	rows, err := config.DB.Query(`

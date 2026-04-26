@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -56,6 +57,11 @@ func InitDB() {
 	} else {
 		log.Println("Database connection established!")
 	}
+
+	// Connection pool limits to prevent connection leaks
+	DB.SetMaxOpenConns(25)
+	DB.SetMaxIdleConns(5)
+	DB.SetConnMaxLifetime(5 * time.Minute)
 }
 
 func PatchSchema() {

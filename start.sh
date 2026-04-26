@@ -46,6 +46,49 @@ echo "  ✓ Seeder ready"
 # ─── [4/4] Start services ────────────────────────────────
 echo "[4/4] Starting services..."
 
+# Start FFmpeg Watchdog (kills orphan FFmpeg processes every 60s)
+(
+    sleep 30  # Wait for services to be ready
+    echo "[Watchdog] FFmpeg zombie watchdog started"
+    while true; do
+        for pid in $(pgrep -f "ffmpeg.*rtmp://127.0.0.1/live/" 2>/dev/null); do
+            # Extract stream key from FFmpeg command line
+            STREAM_KEY=$(ps -p $pid -o args= 2>/dev/null | sed -n 's/.*live\/\([^ ]*\).*/\1/p')
+            if [ -n "$STREAM_KEY" ]; then
+                # Check if this stream is still in the active_streams table
+                COUNT=$(mysql -u "$DB_USER" -p"$DB_PASSWORD" -h "$DB_HOST" -D "$DB_NAME" -N -s -e \
+                    "SELECT COUNT(*) FROM active_streams WHERE stream_key='$STREAM_KEY'" 2>/dev/null)
+                if [ "$COUNT" = "0" ]; then
+                    echo "[Watchdog] Killing orphan FFmpeg PID $pid for stream '$STREAM_KEY'"
+                    kill $pid 2>/dev/null
+                    sleep 0.5
+                    kill -9 $pid 2>/dev/null
+                    rm -f /tmp/hls/${STREAM_KEY}.m3u8 /tmp/hls/${STREAM_KEY}-*.ts /tmp/hls/${STREAM_KEY}.pid
+                fi
+            fi
+        done
+
+        # Also detect duplicate FFmpeg for the same stream key (keep only newest)
+        for SKEY in $(pgrep -a -f "ffmpeg.*rtmp://127.0.0.1/live/" 2>/dev/null | sed -n 's/.*live\/\([^ ]*\).*/\1/p' | sort -u); do
+            PIDS=$(pgrep -f "ffmpeg.*live/${SKEY}" 2>/dev/null | sort -n)
+            PID_COUNT=$(echo "$PIDS" | wc -l)
+            if [ "$PID_COUNT" -gt 1 ]; then
+                # Kill all except the newest (last PID)
+                NEWEST=$(echo "$PIDS" | tail -1)
+                for OLD_PID in $(echo "$PIDS" | head -n -1); do
+                    echo "[Watchdog] Killing duplicate FFmpeg PID $OLD_PID for '$SKEY' (keeping $NEWEST)"
+                    kill $OLD_PID 2>/dev/null
+                    sleep 0.3
+                    kill -9 $OLD_PID 2>/dev/null
+                done
+            fi
+        done
+
+        sleep 60
+    done
+) &
+echo "  ✓ FFmpeg Watchdog started"
+
 # Start Golang API Backend in background
 /usr/local/bin/rtmp_server &
 echo "  ✓ Go API Server started"
